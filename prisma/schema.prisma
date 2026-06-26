@@ -1,0 +1,231 @@
+// =========================================================
+// Stock Control & Inventory Management System
+// Multi-business: Waterproofing Services, Chemical Trading, LPG Management
+// Core principle: current stock is NEVER stored — always derived from stock_transactions
+// =========================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// =========================================================
+// 1. ORGANIZATION / ACCESS
+// =========================================================
+
+model BusinessUnit {
+  id        Int      @id @default(autoincrement())
+  name      String
+  code      String   @unique
+  items     Item[]
+  locations Location[]
+}
+
+model User {
+  id              String   @id @default(cuid())
+  fullName        String
+  email           String?  @unique
+  phone           String?
+  passwordHash    String   @default("x")
+  role            String   @default("VIEWER") // ADMIN | WAREHOUSE_SUPERVISOR | STOCK_CLERK | PROJECT_ENGINEER | VIEWER
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  locationAccess  UserLocationAccess[]
+  requestedTxns   StockTransaction[] @relation("TxnRequestedBy")
+  approvedTxns    StockTransaction[] @relation("TxnApprovedBy")
+  scannedTxns     StockTransaction[] @relation("TxnScannedBy")
+}
+
+model UserLocationAccess {
+  userId     String
+  locationId Int
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@id([userId, locationId])
+}
+
+// =========================================================
+// 2. LOCATIONS (Warehouse, Project Site, Vehicle, Supplier, Customer)
+// =========================================================
+
+model Location {
+  id              Int      @id @default(autoincrement())
+  name            String
+  type            String   // WAREHOUSE | PROJECT_SITE | VEHICLE | SUPPLIER | CUSTOMER
+  businessUnitId  Int?
+  businessUnit    BusinessUnit? @relation(fields: [businessUnitId], references: [id])
+  address         String?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  itemUnits       ItemUnit[]      @relation("UnitCurrentLocation")
+  txnFrom         StockTransaction[] @relation("TxnFromLocation")
+  txnTo           StockTransaction[] @relation("TxnToLocation")
+  projectSite     Project?
+  userAccess      UserLocationAccess[]
+}
+
+// =========================================================
+// 3. ITEM MASTER (shared across all 3 business lines)
+// =========================================================
+
+model ItemCategory {
+  id            Int      @id @default(autoincrement())
+  name          String   // Tool | Equipment | Consumable | Material | Chemical | LPG Cylinder
+  trackingMode  String   // SERIALIZED | BATCH
+  items         Item[]
+}
+
+model Item {
+  id              Int      @id @default(autoincrement())
+  businessUnitId  Int?
+  businessUnit    BusinessUnit? @relation(fields: [businessUnitId], references: [id])
+  categoryId      Int
+  category        ItemCategory @relation(fields: [categoryId], references: [id])
+  sku             String   @unique
+  name            String
+  unitOfMeasure   String   // pcs | liters | kg | set
+  unitCost        Float    @default(0)
+  reorderLevel    Float    @default(0)
+  isActive        Boolean  @default(true)
+  attributes      String   @default("{}") // JSON string — Phase 3-extensible
+  createdAt       DateTime @default(now())
+
+  units           ItemUnit[]
+  batches         ItemBatch[]
+  transactions    StockTransaction[]
+}
+
+// Serialized units: one row per physical tool/equipment/cylinder
+model ItemUnit {
+  id                Int      @id @default(autoincrement())
+  itemId            Int
+  item              Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  serialNo          String   @unique
+  qrCode            String   @unique
+  currentLocationId Int?
+  currentLocation   Location? @relation("UnitCurrentLocation", fields: [currentLocationId], references: [id])
+  status            String   @default("AVAILABLE") // AVAILABLE | IN_USE | UNDER_REPAIR | RETIRED | LOST
+  receivedAt        DateTime?
+  attributes        String   @default("{}")
+  createdAt         DateTime @default(now())
+
+  transactions      StockTransaction[]
+}
+
+// Batch/lot tracked stock: consumables, materials, chemicals
+model ItemBatch {
+  id            Int       @id @default(autoincrement())
+  itemId        Int
+  item          Item      @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  batchNo       String
+  qrCode        String    @unique
+  qtyReceived   Float
+  expiryDate    DateTime?
+  supplierRef   String?
+  receivedAt    DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+
+  transactions  StockTransaction[]
+
+  @@unique([itemId, batchNo])
+}
+
+// =========================================================
+// 4. THE LEDGER — single source of truth for ALL stock movement
+// =========================================================
+
+model StockTransaction {
+  id                Int       @id @default(autoincrement())
+  transactionType   String    // RECEIPT | REQUEST | DELIVERY | PULL_OUT | TRANSFER | CONSUMPTION | ADJUSTMENT
+  itemUnitId        Int?
+  itemUnit          ItemUnit? @relation(fields: [itemUnitId], references: [id])
+  itemBatchId       Int?
+  itemBatch         ItemBatch? @relation(fields: [itemBatchId], references: [id])
+  itemId            Int?
+  item              Item?     @relation(fields: [itemId], references: [id])
+  quantity          Float?
+
+  fromLocationId    Int?
+  fromLocation      Location? @relation("TxnFromLocation", fields: [fromLocationId], references: [id])
+  toLocationId      Int?
+  toLocation        Location? @relation("TxnToLocation", fields: [toLocationId], references: [id])
+
+  projectId         Int?
+  project           Project?  @relation(fields: [projectId], references: [id])
+
+  status            String    @default("PENDING") // PENDING | APPROVED | REJECTED | COMPLETED | CANCELLED
+
+  requestedById     String?
+  requestedBy       User?     @relation("TxnRequestedBy", fields: [requestedById], references: [id])
+  approvedById      String?
+  approvedBy        User?     @relation("TxnApprovedBy", fields: [approvedById], references: [id])
+  approvedAt        DateTime?
+
+  qrScannedAt       DateTime?
+  scannedById       String?
+  scannedBy         User?     @relation("TxnScannedBy", fields: [scannedById], references: [id])
+  photoEvidenceUrl  String?
+
+  reasonCode        String?   // required for ADJUSTMENT: DAMAGED | LOST | COUNT_FIX
+  notes             String?
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([toLocationId])
+  @@index([fromLocationId])
+  @@index([projectId])
+  @@index([status])
+  @@index([transactionType])
+}
+
+// =========================================================
+// 5. PROJECTS
+// =========================================================
+
+model Project {
+  id              Int       @id @default(autoincrement())
+  name            String
+  clientName      String?
+  siteLocationId  Int?      @unique
+  siteLocation    Location? @relation(fields: [siteLocationId], references: [id])
+  serviceType     String?
+  status          String    @default("PLANNING") // PLANNING | ONGOING | ON_HOLD | COMPLETED | CANCELLED
+  percentComplete Float     @default(0)
+  startDate       DateTime?
+  targetEndDate   DateTime?
+  actualEndDate   DateTime?
+  budget          Float?
+  createdAt       DateTime  @default(now())
+
+  milestones      ProjectMilestone[]
+  transactions    StockTransaction[]
+}
+
+model ProjectMilestone {
+  id            Int       @id @default(autoincrement())
+  projectId     Int
+  project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title         String
+  targetDate    DateTime?
+  completedAt   DateTime?
+  percentWeight Float     @default(0)
+}
+
+// =========================================================
+// 6. Static Service & Item Guide
+// =========================================================
+
+model ServiceGuide {
+  id               Int      @id @default(autoincrement())
+  serviceType      String
+  description      String?
+  recommendedItems String?
+  createdAt        DateTime @default(now())
+}

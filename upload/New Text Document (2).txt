@@ -1,0 +1,213 @@
+Good — single-level approval and a static reference guide both simplify Phase 1/2 nicely. Let me build the schema first since everything else (screens, API, QR payloads) derives from it, then move to screen flows in the same response.
+
+## Database Schema (Phase 1 + Phase 2 ready, Phase 3-extensible)
+
+I'll design this in PostgreSQL/Prisma-style, but show it as plain tables so it's stack-agnostic to read. Comments explain the *why* where it's not obvious.
+
+```sql
+-- =========================================================
+-- 1. ORGANIZATION / ACCESS
+-- =========================================================
+
+CREATE TABLE business_units (
+    id              SERIAL PRIMARY KEY,
+    name            VARCHAR(100) NOT NULL,          -- 'Waterproofing Services', 'Chemical Trading', 'LPG Management'
+    code            VARCHAR(10) UNIQUE NOT NULL      -- 'WP', 'CHEM', 'LPG'
+);
+
+CREATE TABLE users (
+    id              SERIAL PRIMARY KEY,
+    full_name       VARCHAR(150) NOT NULL,
+    email           VARCHAR(150) UNIQUE,
+    phone           VARCHAR(20),
+    password_hash   TEXT NOT NULL,
+    role            VARCHAR(30) NOT NULL CHECK (role IN
+                        ('ADMIN','WAREHOUSE_SUPERVISOR','STOCK_CLERK','PROJECT_ENGINEER','VIEWER')),
+    is_active       BOOLEAN DEFAULT TRUE,
+    created_at      TIMESTAMPTZ DEFAULT now()
+);
+
+-- Optional: restrict a clerk to specific sites/warehouses they're allowed to act on
+CREATE TABLE user_location_access (
+    user_id         INT REFERENCES users(id),
+    location_id     INT REFERENCES locations(id),
+    PRIMARY KEY (user_id, location_id)
+);
+
+
+-- =========================================================
+-- 2. LOCATIONS (Warehouse, Project Site, Vehicle, Supplier)
+-- =========================================================
+
+CREATE TABLE locations (
+    id              SERIAL PRIMARY KEY,
+    name            VARCHAR(150) NOT NULL,
+    type            VARCHAR(30) NOT NULL CHECK (type IN
+                        ('WAREHOUSE','PROJECT_SITE','VEHICLE','SUPPLIER','CUSTOMER')),
+    business_unit_id INT REFERENCES business_units(id),  -- nullable: warehouse may serve all units
+    address         TEXT,
+    is_active       BOOLEAN DEFAULT TRUE,
+    created_at      TIMESTAMPTZ DEFAULT now()
+);
+
+
+-- =========================================================
+-- 3. ITEM MASTER (shared across all 3 business lines)
+-- =========================================================
+
+CREATE TABLE item_categories (
+    id              SERIAL PRIMARY KEY,
+    name            VARCHAR(100) NOT NULL,        -- 'Tool','Equipment','Consumable','Material','Chemical','LPG Cylinder'
+    tracking_mode   VARCHAR(20) NOT NULL CHECK (tracking_mode IN ('SERIALIZED','BATCH'))
+);
+
+CREATE TABLE items (
+    id              SERIAL PRIMARY KEY,
+    business_unit_id INT REFERENCES business_units(id),
+    category_id     INT REFERENCES item_categories(id),
+    sku             VARCHAR(50) UNIQUE NOT NULL,
+    name            VARCHAR(200) NOT NULL,
+    unit_of_measure VARCHAR(20) NOT NULL,          -- 'pcs','liters','kg','set'
+    unit_cost       NUMERIC(12,2) DEFAULT 0,        -- last known cost, for project costing
+    reorder_level   NUMERIC(12,2) DEFAULT 0,        -- triggers low-stock alerts
+    is_active       BOOLEAN DEFAULT TRUE,
+
+    -- Extensible attribute fields for Phase 3 (chemicals/LPG) without schema churn:
+    attributes      JSONB DEFAULT '{}'              -- e.g. {"hazard_class":"...", "msds_url":"..."} for chemicals
+                                                      --      {"cylinder_size_kg":11, "last_pressure_test":"2026-01-10"} for LPG
+);
+
+-- Serialized units: one row per physical tool/equipment/cylinder
+CREATE TABLE item_units (
+    id              SERIAL PRIMARY KEY,
+    item_id         INT REFERENCES items(id),
+    serial_no       VARCHAR(100) UNIQUE NOT NULL,
+    qr_code         VARCHAR(100) UNIQUE NOT NULL,   -- opaque pointer ID, e.g. 'WP-TOOL-00482'
+    current_location_id INT REFERENCES locations(id),
+    status          VARCHAR(20) DEFAULT 'AVAILABLE' CHECK (status IN
+                        ('AVAILABLE','IN_USE','UNDER_REPAIR','RETIRED','LOST')),
+    received_at     TIMESTAMPTZ,
+    attributes      JSONB DEFAULT '{}'              -- e.g. LPG: {"last_refill":"...", "test_due":"..."}
+);
+
+-- Batch/lot tracked stock: consumables, materials, chemicals
+CREATE TABLE item_batches (
+    id              SERIAL PRIMARY KEY,
+    item_id         INT REFERENCES items(id),
+    batch_no        VARCHAR(100) NOT NULL,
+    qr_code         VARCHAR(100) UNIQUE NOT NULL,
+    qty_received    NUMERIC(12,2) NOT NULL,
+    expiry_date     DATE,                            -- nullable; relevant for chemicals
+    supplier_ref    VARCHAR(150),
+    received_at     TIMESTAMPTZ DEFAULT now()
+    -- NOTE: current quantity is NEVER stored here — always derived from stock_transactions (see §below)
+);
+
+
+-- =========================================================
+-- 4. THE LEDGER — single source of truth for ALL stock movement
+-- =========================================================
+
+CREATE TABLE stock_transactions (
+    id                  SERIAL PRIMARY KEY,
+    transaction_type    VARCHAR(20) NOT NULL CHECK (transaction_type IN
+                            ('RECEIPT','REQUEST','DELIVERY','PULL_OUT','TRANSFER','CONSUMPTION','ADJUSTMENT')),
+
+    item_unit_id        INT REFERENCES item_units(id),   -- for serialized items (one row = one unit)
+    item_batch_id       INT REFERENCES item_batches(id), -- for batch items
+    quantity            NUMERIC(12,2),                    -- only used for batch transactions; NULL for serialized
+
+    from_location_id    INT REFERENCES locations(id),
+    to_location_id      INT REFERENCES locations(id),
+
+    project_id          INT REFERENCES projects(id),      -- nullable; links to costing if site-related
+
+    status              VARCHAR(20) DEFAULT 'PENDING' CHECK (status IN
+                            ('PENDING','APPROVED','REJECTED','COMPLETED','CANCELLED')),
+
+    requested_by        INT REFERENCES users(id),
+    approved_by         INT REFERENCES users(id),
+    approved_at         TIMESTAMPTZ,
+
+    qr_scanned_at       TIMESTAMPTZ,                       -- proof of physical scan, not just a typed entry
+    scanned_by          INT REFERENCES users(id),
+    photo_evidence_url  TEXT,
+
+    reason_code         VARCHAR(50),                       -- required for ADJUSTMENT: 'DAMAGED','LOST','COUNT_FIX'
+    notes               TEXT,
+
+    created_at          TIMESTAMPTZ DEFAULT now(),
+
+    CHECK (item_unit_id IS NOT NULL OR item_batch_id IS NOT NULL)  -- must reference one or the other
+);
+
+-- Index for the most common query: "what's the current stock at location X"
+CREATE INDEX idx_txn_to_location ON stock_transactions(to_location_id, status);
+CREATE INDEX idx_txn_from_location ON stock_transactions(from_location_id, status);
+CREATE INDEX idx_txn_project ON stock_transactions(project_id);
+
+
+-- =========================================================
+-- 5. PROJECTS (your existing project tracker, now tied to the ledger)
+-- =========================================================
+
+CREATE TABLE projects (
+    id              SERIAL PRIMARY KEY,
+    name            VARCHAR(200) NOT NULL,
+    client_name     VARCHAR(200),
+    site_location_id INT REFERENCES locations(id),   -- 1:1 with a PROJECT_SITE location
+    service_type    VARCHAR(100),                      -- links to service_guides
+    status          VARCHAR(30) DEFAULT 'PLANNING' CHECK (status IN
+                        ('PLANNING','ONGOING','ON_HOLD','COMPLETED','CANCELLED')),
+    percent_complete NUMERIC(5,2) DEFAULT 0,
+    start_date      DATE,
+    target_end_date DATE,
+    actual_end_date DATE,
+    budget          NUMERIC(14,2),
+    created_at      TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE project_milestones (
+    id              SERIAL PRIMARY KEY,
+    project_id      INT REFERENCES projects(id),
+    title           VARCHAR(200),
+    target_date     DATE,
+    completed_at    TIMESTAMPTZ,
+    percent_weight  NUMERIC(5,2)        -- contributes to project.percent_complete
+);
+
+-- Static Service & Item Guide (per your answer: static reference, not auto-BOM yet)
+CREATE TABLE service_guides (
+    id              SERIAL PRIMARY KEY,
+    service_type    VARCHAR(100) NOT NULL,   -- 'Roof Deck Waterproofing', 'Basement Injection', etc.
+    description     TEXT,
+    recommended_items TEXT                    -- simple text/markdown list for now; normalize into a table in Phase 2.5 if you automate later
+);
+```
+
+### Why a few of these choices matter for you specifically
+
+- **`attributes JSONB`** on `items` and `item_units` — this is how Phase 3 (chemical hazard data, LPG cylinder safety fields) slots in *without* touching the core schema or breaking Phase 1 screens. You add fields to JSON, not new migrations across a live system.
+- **Current stock is never a stored column** — it's always `SUM/status of stock_transactions`. This is the one rule that, if you let a developer (even future-you, in a hurry) bypass it and "just store a quantity field for speed," silently reintroduces the exact Excel bug you're fixing. Worth writing this down somewhere as a hard rule for your team.
+- **`qr_scanned_at` + `scanned_by` separate from `created_at` + `requested_by`** — this distinguishes "someone typed this into the app" from "someone physically scanned a code in front of the item." That gap is exactly your current authorization hole.
+- **Single-level approval** is modeled simply: `approved_by`/`approved_at` on the transaction itself. If you ever need multi-level later, you'd split this into a separate `transaction_approvals` table — but you don't need that complexity now.
+
+---
+
+## Screen Flows
+
+Now the three clients, as user flows tied directly to the schema above.Now let me build the three screen-flow diagrams — one per client, since that's clearer than cramming all three into one dense diagram.The Android flow is intentionally narrow: five actions, but they all funnel into the **same scan → confirm → submit** pattern. That's a deliberate design choice — build one reusable screen template, parameterize it by transaction type, and you get all five actions for the cost of one. Request is the one exception (routed in coral) since it doesn't move stock yet, it just creates a pending document for someone else to act on.
+
+Now the Admin desktop and the public Web app:The admin desktop is structured around **one core loop**: dashboard → approval queue → review → approve/reject → ledger updates. That loop is your entire "control and authorize" fix made visible as a UI. Master Data, Reports, and User Management are supporting screens — important, but secondary to that loop. If you're building solo and need to sequence your own dev work, build the approval queue loop *first*, even before fancy dashboards — it's the highest-leverage screen in the whole system.That's the "mini system in each project site page" you described — it's not a separate database, it's a **filtered, read-only view of the same ledger**, scoped to `WHERE to_location_id = this_site OR from_location_id = this_site`. The "Stock by source" split (warehouse-delivered vs transferred-in) is just grouping that same query by `transaction_type`. The Service Guide sits alongside it as a static reference (per your earlier answer), pulled straight from the `service_guides` table.
+
+---
+
+## What this gives you, end to end
+
+- **Schema** — done above, ready to turn into Prisma models or raw SQL migrations
+- **Stack** — Node/TS + PostgreSQL + Next.js (web) + Electron-or-shared-web (admin) + React Native (android)
+- **Screen flows** — all three clients mapped, all converging on the same ledger table
+
+## Suggested next step
+
+The highest-leverage next artifact would be the **API endpoint list** (e.g. `POST /transactions/receipt`, `POST /transactions/approve/:id`, `GET /locations/:id/stock`) — that's the contract between your three frontends and the backend, and writing it now means your Android, web, and admin builds can all proceed in parallel against a stable interface instead of you guessing as you go.Want me to draft that API endpoint list next, or would it be more useful right now to write out the **printed QR label workflow** (how a batch gets a code at receipt, printed, and physically applied) since that's the piece directly tied to your stock clerk's day-to-day pain?
