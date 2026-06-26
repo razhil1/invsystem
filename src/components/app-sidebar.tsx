@@ -1,7 +1,7 @@
 "use client";
 
 import { useUI, type ViewKey } from "@/lib/store";
-import { useFetch } from "@/lib/hooks";
+import { usePendingCount } from "@/lib/use-pending-count";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
@@ -51,10 +51,8 @@ export function AppSidebar() {
   const sidebarCollapsed = useUI((s) => s.sidebarCollapsed);
   const toggleSidebar = useUI((s) => s.toggleSidebar);
 
-  // Fetch pending count directly — keeps it local to the sidebar,
-  // avoiding cross-component store updates that trigger setState-during-render
-  const { data: pendingData } = useFetch<{ txns: unknown[] }>("/api/transactions?status=PENDING&limit=200", []);
-  const pendingCount = pendingData?.txns?.length ?? 0;
+  // Shared pending-count cache (single fetch for sidebar + header)
+  const pendingCount = usePendingCount();
 
   const grouped = (["core", "master", "analytics"] as const).map((g) => ({
     group: g,

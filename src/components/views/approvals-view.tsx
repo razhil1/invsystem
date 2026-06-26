@@ -1,6 +1,7 @@
 "use client";
 
 import { useFetch } from "@/lib/hooks";
+import { refreshPendingCount } from "@/lib/use-pending-count";
 import type { TxnLite } from "@/lib/types";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -69,6 +70,7 @@ export function ApprovalsView() {
         { description: t.item?.name }
       );
       refresh();
+      refreshPendingCount();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Action failed");
     } finally {

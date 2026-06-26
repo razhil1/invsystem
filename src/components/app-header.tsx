@@ -12,9 +12,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Menu, Moon, Sun, Bell, ScanLine, Search } from "lucide-react";
+import { Menu, Moon, Sun, Bell, ScanLine, Search, Plus } from "lucide-react";
 import { ROLE_LABELS, type ViewKey } from "@/lib/types";
-import { useFetch } from "@/lib/hooks";
+import { usePendingCount } from "@/lib/use-pending-count";
+import { NewTransactionDialog } from "@/components/new-transaction-dialog";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -42,9 +43,8 @@ export function AppHeader() {
   const openScanner = useUI((s) => s.openScanner);
   const setView = useUI((s) => s.setView);
 
-  // Fetch pending count directly (local to header, avoids store contention)
-  const { data: pendingData } = useFetch<{ txns: unknown[] }>("/api/transactions?status=PENDING&limit=200", []);
-  const pendingCount = pendingData?.txns?.length ?? 0;
+  // Shared pending-count cache (single fetch for sidebar + header)
+  const pendingCount = usePendingCount();
 
   const meta = VIEW_TITLES[view];
   const currentUser = users.find((u) => u.id === currentUserId);
@@ -84,6 +84,9 @@ export function AppHeader() {
         <span>Search ledger…</span>
         <kbd className="ml-2 rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px]">/</kbd>
       </Button>
+
+      {/* New transaction */}
+      <HeaderNewTransaction />
 
       {/* Scanner quick-access */}
       <Button
@@ -152,5 +155,23 @@ export function AppHeader() {
         </DropdownMenuContent>
       </DropdownMenu>
     </header>
+  );
+}
+
+function HeaderNewTransaction() {
+  const [open, setOpen] = useState(false);
+  const setView = useUI((s) => s.setView);
+  return (
+    <>
+      <Button
+        size="sm"
+        className="gap-1.5 shadow-sm"
+        onClick={() => setOpen(true)}
+      >
+        <Plus className="h-4 w-4" />
+        <span className="hidden sm:inline">New</span>
+      </Button>
+      <NewTransactionDialog open={open} onOpenChange={setOpen} onCreated={() => setView("transactions")} showTrigger={false} />
+    </>
   );
 }

@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ROLE_LABELS } from "@/lib/types";
+import { NewTransactionDialog } from "@/components/new-transaction-dialog";
 
 const TYPE_OPTIONS = ["RECEIPT", "REQUEST", "DELIVERY", "PULL_OUT", "TRANSFER", "CONSUMPTION", "ADJUSTMENT"];
 const STATUS_OPTIONS = ["PENDING", "APPROVED", "REJECTED", "COMPLETED", "CANCELLED"];
@@ -32,6 +33,7 @@ export function TransactionsView() {
   const [q, setQ] = useState("");
   const [page, setPage] = useState(0);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
   const pageSize = 25;
 
   // Build query
@@ -96,6 +98,7 @@ export function TransactionsView() {
             <Button variant="outline" size="sm" onClick={refresh} className="gap-1.5">
               <RefreshCw className="h-3.5 w-3.5" /> Refresh
             </Button>
+            <NewTransactionDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={refresh} />
           </div>
         </CardContent>
       </Card>

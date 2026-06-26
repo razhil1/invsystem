@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { QRCodeSVG } from "@/components/qr-code";
+import { RegisterUnitBatchDialog } from "@/components/register-unit-batch-dialog";
 import { toast } from "sonner";
 
 export function ItemsView() {
@@ -32,6 +33,7 @@ export function ItemsView() {
   const [q, setQ] = useState("");
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [registerOpen, setRegisterOpen] = useState(false);
 
   const params = new URLSearchParams();
   if (bu !== "ALL") params.set("businessUnitId", bu);
@@ -167,9 +169,14 @@ export function ItemsView() {
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                       {selected.category.trackingMode === "SERIALIZED" ? "Serialized Units" : "Batches"}
                     </span>
-                    <Button variant="outline" size="sm" className="h-7 gap-1 text-xs no-print" onClick={() => window.print()}>
-                      <Printer className="h-3 w-3" /> Print QR sheet
-                    </Button>
+                    <div className="flex items-center gap-1.5">
+                      <Button variant="default" size="sm" className="h-7 gap-1 text-xs" onClick={() => setRegisterOpen(true)}>
+                        <Plus className="h-3 w-3" /> Register {selected.category.trackingMode === "SERIALIZED" ? "Unit" : "Batch"}
+                      </Button>
+                      <Button variant="outline" size="sm" className="h-7 gap-1 text-xs no-print" onClick={() => window.print()}>
+                        <Printer className="h-3 w-3" /> Print
+                      </Button>
+                    </div>
                   </div>
                   {selected.category.trackingMode === "SERIALIZED" ? (
                     <div className="grid grid-cols-2 gap-2 printable sm:grid-cols-3">
@@ -214,6 +221,14 @@ export function ItemsView() {
           )}
         </SheetContent>
       </Sheet>
+
+      {/* Register unit/batch dialog */}
+      <RegisterUnitBatchDialog
+        open={registerOpen}
+        onOpenChange={setRegisterOpen}
+        item={selected}
+        onRegistered={refresh}
+      />
     </div>
   );
 }

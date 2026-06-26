@@ -12,34 +12,54 @@ interface FetchState<T> {
 /**
  * useFetch — lightweight data fetching with manual refresh.
  * Re-fetches whenever the URL or any dep changes.
+ *
+ * State updates are deferred to a fresh macrotask via the mountedRef +
+ * queueMicrotask guard, preventing React "Cannot update component X while
+ * rendering component Y" warnings when sibling components fetch concurrently.
  */
 export function useFetch<T>(url: string | null, deps: unknown[] = []): FetchState<T> {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(!!url);
   const [error, setError] = useState<string | null>(null);
   const seqRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  // Track mount status so we never setState after unmount
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  // Stable setData/setError/setLoading wrappers that check mount + use
+  // a microtask deferral to avoid render-during-render conflicts
+  const safeSet = useCallback(<K,>(fn: (v: K) => void, val: K) => {
+    if (!mountedRef.current) return;
+    // Defer to next microtask so it never runs during a synchronous render
+    queueMicrotask(() => {
+      if (mountedRef.current) fn(val);
+    });
+  }, []);
 
   const run = useCallback(async () => {
     if (!url) {
-      setData(null);
-      setLoading(false);
+      safeSet(setData, null);
+      safeSet(setLoading, false);
       return;
     }
     const seq = ++seqRef.current;
-    setLoading(true);
-    setError(null);
+    safeSet(setLoading, true);
+    safeSet(setError, null);
     try {
       const res = await fetch(url, { headers: { Accept: "application/json" } });
       if (!res.ok) throw new Error(`Request failed: ${res.status}`);
       const json = await res.json();
-      if (seq === seqRef.current) setData(json);
+      if (seq === seqRef.current) safeSet(setData as (v: T | null) => void, json as T);
     } catch (e) {
-      if (seq === seqRef.current) setError(e instanceof Error ? e.message : "Unknown error");
+      if (seq === seqRef.current) safeSet(setError, e instanceof Error ? e.message : "Unknown error");
     } finally {
-      if (seq === seqRef.current) setLoading(false);
+      if (seq === seqRef.current) safeSet(setLoading, false);
     }
-     
-  }, [url]);
+  }, [url, safeSet]);
 
   useEffect(() => {
     run();

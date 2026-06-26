@@ -17,6 +17,7 @@ import {
   ScanLine,
   Activity,
   Clock,
+  Plus,
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, PieChart, Pie, Cell, Legend,
@@ -24,6 +25,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { formatNumber, relativeTime } from "@/lib/hooks";
+import { NewTransactionDialog } from "@/components/new-transaction-dialog";
+import { useState } from "react";
 
 const UNIT_STATUS_COLORS: Record<string, string> = {
   AVAILABLE: "#10b981",
@@ -97,9 +100,10 @@ export function DashboardView() {
 
       {/* Quick actions */}
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" onClick={() => setView("approvals")} className="gap-2">
+        <Button size="sm" onClick={() => setView("approvals")} className="gap-2 shadow-sm">
           <ClipboardCheck className="h-4 w-4" /> Review {data.kpis.pendingApprovals} pending
         </Button>
+        <DashboardNewTransaction />
         <Button size="sm" variant="outline" onClick={() => openScanner()} className="gap-2">
           <ScanLine className="h-4 w-4" /> Scan QR
         </Button>
@@ -302,5 +306,18 @@ function DashboardSkeleton() {
       </div>
       <Skeleton className="h-64" />
     </div>
+  );
+}
+
+function DashboardNewTransaction() {
+  const [open, setOpen] = useState(false);
+  const setView = useUI((s) => s.setView);
+  return (
+    <>
+      <Button size="sm" variant="default" onClick={() => setOpen(true)} className="gap-2 shadow-sm">
+        <Plus className="h-4 w-4" /> New Transaction
+      </Button>
+      <NewTransactionDialog open={open} onOpenChange={setOpen} onCreated={() => setView("transactions")} showTrigger={false} />
+    </>
   );
 }

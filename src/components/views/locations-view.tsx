@@ -12,7 +12,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { LOCATION_TYPES } from "@/lib/types";
-import { Search, MapPin, Warehouse, Truck, Building2, Package, ArrowRight, Boxes } from "lucide-react";
+import { Search, MapPin, Warehouse, Truck, Building2, Package, ArrowRight, Boxes, Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
@@ -20,6 +20,11 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatNumber } from "@/lib/hooks";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
 
 const TYPE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   WAREHOUSE: Warehouse,
@@ -41,11 +46,12 @@ export function LocationsView() {
   const [type, setType] = useState("ALL");
   const [q, setQ] = useState("");
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
   const setView = useUI((s) => s.setView);
 
   const params = new URLSearchParams();
   if (type !== "ALL") params.set("type", type);
-  const { data, loading } = useFetch<{ locations: (LocationLite & { _count?: { itemUnits: number; txnFrom: number; txnTo: number } })[] }>(`/api/locations?${params.toString()}`, [type]);
+  const { data, loading, refresh } = useFetch<{ locations: (LocationLite & { _count?: { itemUnits: number; txnFrom: number; txnTo: number } })[] }>(`/api/locations?${params.toString()}`, [type]);
 
   const locations = (data?.locations ?? []).filter((l) =>
     !q.trim() || l.name.toLowerCase().includes(q.toLowerCase()) || (l.address ?? "").toLowerCase().includes(q.toLowerCase())
@@ -70,14 +76,21 @@ export function LocationsView() {
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input placeholder="Search by name or address…" value={q} onChange={(e) => setQ(e.target.value)} className="pl-9" />
         </div>
-        <Select value={type} onValueChange={setType}>
-          <SelectTrigger className="w-[180px]"><SelectValue placeholder="Location type" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="ALL">All types</SelectItem>
-            {Object.entries(LOCATION_TYPES).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-2">
+          <Select value={type} onValueChange={setType}>
+            <SelectTrigger className="w-[180px]"><SelectValue placeholder="Location type" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All types</SelectItem>
+              {Object.entries(LOCATION_TYPES).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Button size="sm" className="gap-1.5 shadow-sm" onClick={() => setCreateOpen(true)}>
+            <Plus className="h-4 w-4" /> New Location
+          </Button>
+        </div>
       </div>
+
+      <CreateLocationDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={refresh} />
 
       {loading ? (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -279,5 +292,83 @@ function LocationStockContent({ locationId, onOpenProject }: { locationId: numbe
         </Button>
       </div>
     </ScrollArea>
+  );
+}
+
+function CreateLocationDialog({ open, onOpenChange, onCreated }: { open: boolean; onOpenChange: (o: boolean) => void; onCreated: () => void }) {
+  const [form, setForm] = useState({ name: "", type: "WAREHOUSE", businessUnitId: "", address: "" });
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    if (!form.name) { toast.error("Name is required"); return; }
+    setSaving(true);
+    try {
+      const body: Record<string, unknown> = { name: form.name, type: form.type, address: form.address };
+      if (form.businessUnitId) body.businessUnitId = Number(form.businessUnitId);
+      const res = await fetch("/api/locations/create", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error(e.error ?? `Failed (${res.status})`);
+      }
+      toast.success("Location created", { description: form.name });
+      onCreated();
+      onOpenChange(false);
+      setForm({ name: "", type: "WAREHOUSE", businessUnitId: "", address: "" });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Create Location</DialogTitle>
+          <DialogDescription>Add a warehouse, project site, vehicle, supplier, or customer location.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="lname">Name *</Label>
+            <Input id="lname" placeholder="e.g. Tuas Central Warehouse" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoFocus />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Type</Label>
+              <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Object.entries(LOCATION_TYPES).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Business unit</Label>
+              <Select value={form.businessUnitId} onValueChange={(v) => setForm({ ...form, businessUnitId: v })}>
+                <SelectTrigger><SelectValue placeholder="Optional" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">— None —</SelectItem>
+                  <SelectItem value="1">Waterproofing (WP)</SelectItem>
+                  <SelectItem value="2">Chemical (CHEM)</SelectItem>
+                  <SelectItem value="3">LPG (LPG)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="laddr">Address</Label>
+            <Input id="laddr" placeholder="Street address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={save} disabled={saving}>{saving ? "Saving…" : "Create location"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import dynamic from "next/dynamic";
-import { useUI } from "@/lib/store";
+import { useUI, type ViewKey } from "@/lib/store";
 import { AppSidebar } from "@/components/app-sidebar";
 import { AppHeader } from "@/components/app-header";
 import { QRScannerModal } from "@/components/qr-scanner-modal";
@@ -31,7 +31,6 @@ function ViewSkeleton() {
 
 export default function Page() {
   const view = useUI((s) => s.view);
-  const setUsers = useUI((s) => s.setUsers);
   const theme = useUI((s) => s.theme);
   const openScanner = useUI((s) => s.openScanner);
   const setView = useUI((s) => s.setView);
@@ -41,23 +40,85 @@ export default function Page() {
     setNextTheme(theme);
   }, [theme, setNextTheme]);
 
+  // Global keyboard shortcuts
   useEffect(() => {
+    let gPressed = false;
+    let gTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function handler(e: KeyboardEvent) {
+      // Skip if typing in an input/textarea/select
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable) {
+        return;
+      }
+      // Skip if modifier keys are pressed
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      const state = useUI.getState();
+
+      // 'g' prefix for goto shortcuts
+      if (e.key === "g" && !gPressed) {
+        gPressed = true;
+        if (gTimer) clearTimeout(gTimer);
+        gTimer = setTimeout(() => { gPressed = false; }, 1000);
+        return;
+      }
+      if (gPressed) {
+        const map: Record<string, ViewKey> = {
+          d: "dashboard", a: "approvals", t: "transactions", i: "items",
+          l: "locations", p: "projects", r: "reports", s: "scanner",
+        };
+        if (map[e.key]) {
+          state.setView(map[e.key]);
+          e.preventDefault();
+        }
+        gPressed = false;
+        return;
+      }
+
+      // Single-key shortcuts
+      if (e.key === "/") {
+        state.setView("transactions");
+        e.preventDefault();
+      } else if (e.key === "s") {
+        state.openScanner();
+        e.preventDefault();
+      } else if (e.key === "?") {
+        // Show shortcuts help via toast
+        import("sonner").then(({ toast }) => {
+          toast.info("Keyboard shortcuts", {
+            description: "g+d Dashboard · g+a Approvals · g+t Ledger · g+i Items · g+l Locations · g+p Projects · g+r Reports · s Scan · / Search",
+            duration: 6000,
+          });
+        });
+      }
+    }
+
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
     fetch("/api/users")
       .then((r) => r.json())
       .then((d) => {
+        if (cancelled) return;
         const users = d.users ?? [];
-        setUsers(users);
-        // Auto-select admin if no user is currently chosen
-        if (users.length > 0) {
-          const current = useUI.getState().currentUserId;
-          if (!current) {
-            const admin = users.find((u: { role: string }) => u.role === "ADMIN") ?? users[0];
-            if (admin) useUI.getState().setCurrentUser(admin.id, admin.fullName);
-          }
+        // Auto-select admin if no user is currently chosen.
+        // Use a separate effect (not inline store mutation) to avoid
+        // setState-during-render warnings.
+        const current = useUI.getState().currentUserId;
+        const admin = users.find((u: { role: string }) => u.role === "ADMIN") ?? users[0];
+        if (!current && admin) {
+          useUI.setState({ users, currentUserId: admin.id, currentUserName: admin.fullName });
+        } else {
+          useUI.setState({ users });
         }
       })
       .catch(() => {});
-  }, [setUsers]);
+    return () => { cancelled = true; };
+  }, []);
 
   return (
     <div className="flex min-h-screen w-full bg-background">
@@ -65,6 +126,7 @@ export default function Page() {
       <div className="flex min-h-screen flex-1 flex-col lg:pl-0">
         <AppHeader />
         <main className="flex-1 overflow-x-hidden">
+          <div key={view} className="animate-fade-in-up">
           {view === "dashboard" && <DashboardView />}
           {view === "approvals" && <ApprovalsView />}
           {view === "transactions" && <TransactionsView />}
@@ -74,6 +136,7 @@ export default function Page() {
           {view === "guides" && <GuidesView />}
           {view === "reports" && <ReportsView />}
           {view === "scanner" && <ScannerRedirect onOpen={() => openScanner()} onDone={() => setView("dashboard")} />}
+          </div>
         </main>
         <footer className="mt-auto border-t border-border bg-card/50 px-6 py-4 text-xs text-muted-foreground">
           <div className="mx-auto flex max-w-[1600px] flex-col items-start justify-between gap-2 sm:flex-row sm:items-center">
