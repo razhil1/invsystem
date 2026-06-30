@@ -61,3 +61,4 @@ screenshot-*.png
 # Upload/downloads
 /download/
 /upload/
+*.png

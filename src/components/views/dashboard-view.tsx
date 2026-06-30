@@ -18,9 +18,11 @@ import {
   Activity,
   Clock,
   Plus,
+  CalendarClock,
+  FlaskConical,
 } from "lucide-react";
 import {
-  BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, PieChart, Pie, Cell, Legend,
+  BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, PieChart, Pie, Cell, Legend, AreaChart, Area, CartesianGrid,
 } from "recharts";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -165,6 +167,12 @@ export function DashboardView() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Activity timeline */}
+      <ActivityTimeline />
+
+      {/* Expiry alerts */}
+      <ExpiryAlerts />
 
       {/* Low stock + recent activity */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -319,5 +327,141 @@ function DashboardNewTransaction() {
       </Button>
       <NewTransactionDialog open={open} onOpenChange={setOpen} onCreated={() => setView("transactions")} showTrigger={false} />
     </>
+  );
+}
+
+function ActivityTimeline() {
+  const [days, setDays] = useState(30);
+  const { data, loading } = useFetch<{ data: { date: string; [k: string]: number | string }[]; types: string[]; total: number }>(`/api/dashboard/timeline?days=${days}`, [days]);
+
+  const timelineData = (data?.data ?? []).map((row) => ({
+    date: row.date.slice(5),
+    ...Object.fromEntries(Object.entries(row).filter(([k]) => k !== "date")),
+  }));
+  const types = data?.types ?? [];
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0">
+        <div>
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <Activity className="h-4 w-4 text-primary" /> Activity Timeline
+          </CardTitle>
+          <CardDescription className="text-xs">Stock movements over the last {days} days · {data?.total ?? 0} total</CardDescription>
+        </div>
+        <div className="flex items-center gap-1 rounded-md border border-border/60 p-0.5">
+          {[7, 30, 90].map((d) => (
+            <button key={d} onClick={() => setDays(d)} className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${days === d ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}>
+              {d}d
+            </button>
+          ))}
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="h-56">
+          {loading ? (
+            <div className="flex h-full items-center justify-center"><div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>
+          ) : timelineData.length === 0 ? (
+            <div className="flex h-full items-center justify-center text-xs text-muted-foreground">No movements in this period</div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={timelineData} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                <defs>
+                  {types.map((t) => (
+                    <linearGradient key={t} id={`grad-${t}`} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={TYPE_COLORS[t] ?? "#71717a"} stopOpacity={0.6} />
+                      <stop offset="95%" stopColor={TYPE_COLORS[t] ?? "#71717a"} stopOpacity={0.05} />
+                    </linearGradient>
+                  ))}
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 10 }} stroke="currentColor" className="fill-muted-foreground" interval="preserveStartEnd" minTickGap={30} />
+                <YAxis tick={{ fontSize: 11 }} allowDecimals={false} stroke="currentColor" className="fill-muted-foreground" />
+                <Tooltip contentStyle={{ background: "var(--popover)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }} />
+                {types.map((t) => (
+                  <Area key={t} type="monotone" dataKey={t} stroke={TYPE_COLORS[t] ?? "#71717a"} strokeWidth={2} fill={`url(#grad-${t})`} />
+                ))}
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+        {types.length > 0 && (
+          <div className="mt-2 flex flex-wrap items-center justify-center gap-3">
+            {types.map((t) => (
+              <div key={t} className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                <span className="h-2 w-2 rounded-full" style={{ background: TYPE_COLORS[t] ?? "#71717a" }} />
+                {t.replace("_", " ")}
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ExpiryAlerts() {
+  const { data, loading } = useFetch<{ batches: { id: number; batchNo: string; qrCode: string; itemName: string; sku: string; bu: string; qtyReceived: number; unit: string; expiryDate: string; daysLeft: number; status: string }[] }>("/api/dashboard/expiry");
+  const setView = useUI((s) => s.setView);
+
+  const batches = data?.batches ?? [];
+  if (loading) return (
+    <Card><CardHeader><CardTitle className="flex items-center gap-2 text-sm"><CalendarClock className="h-4 w-4 text-amber-500" /> Expiry Tracker</CardTitle></CardHeader><CardContent><Skeleton className="h-24 w-full" /></CardContent></Card>
+  );
+  if (batches.length === 0) return null;
+
+  const expired = batches.filter((b) => b.status === "EXPIRED");
+  const critical = batches.filter((b) => b.status === "CRITICAL");
+  const warning = batches.filter((b) => b.status === "WARNING");
+
+  return (
+    <Card className="border-amber-200/40 dark:border-amber-900/30">
+      <CardHeader className="flex flex-row items-center justify-between space-y-0">
+        <div>
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <CalendarClock className="h-4 w-4 text-amber-500" /> Expiry Tracker
+          </CardTitle>
+          <CardDescription className="text-xs">Batches expiring within 90 days</CardDescription>
+        </div>
+        <div className="flex items-center gap-2 text-[11px]">
+          {expired.length > 0 && <span className="flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 font-medium text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">{expired.length} expired</span>}
+          {critical.length > 0 && <span className="flex items-center gap-1 rounded-full bg-orange-100 px-2 py-0.5 font-medium text-orange-700 dark:bg-orange-950/40 dark:text-orange-300">{critical.length} ≤30d</span>}
+          {warning.length > 0 && <span className="flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">{warning.length} ≤90d</span>}
+        </div>
+      </CardHeader>
+      <CardContent>
+        <ul className="scroll-thin max-h-64 space-y-1.5 overflow-y-auto pr-1">
+          {batches.slice(0, 8).map((b) => {
+            const colorClass = b.status === "EXPIRED" ? "border-rose-200/60 bg-rose-50/40 dark:border-rose-900/30 dark:bg-rose-950/10" : b.status === "CRITICAL" ? "border-orange-200/60 bg-orange-50/40 dark:border-orange-900/30 dark:bg-orange-950/10" : "border-amber-200/60 bg-amber-50/30 dark:border-amber-900/30 dark:bg-amber-950/10";
+            const textClass = b.status === "EXPIRED" ? "text-rose-700 dark:text-rose-300" : b.status === "CRITICAL" ? "text-orange-700 dark:text-orange-300" : "text-amber-700 dark:text-amber-300";
+            return (
+              <li key={b.id} className={`flex items-center gap-3 rounded-md border p-2 ${colorClass}`}>
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-white/60 dark:bg-black/20">
+                  <FlaskConical className={`h-4 w-4 ${textClass}`} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate text-xs font-medium">{b.itemName}</span>
+                    <BUBadge code={b.bu} />
+                  </div>
+                  <div className="font-mono text-[10px] text-muted-foreground">
+                    {b.sku} · Batch {b.batchNo} · {formatNumber(b.qtyReceived, 1)} {b.unit}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className={`text-xs font-bold ${textClass}`}>{b.daysLeft < 0 ? `${Math.abs(b.daysLeft)}d overdue` : `${b.daysLeft}d left`}</div>
+                  <div className="text-[10px] text-muted-foreground">{b.expiryDate}</div>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+        {batches.length > 8 && (
+          <Button variant="ghost" size="sm" className="mt-2 w-full gap-1 text-xs" onClick={() => setView("items")}>
+            View all {batches.length} batches <ArrowRight className="h-3 w-3" />
+          </Button>
+        )}
+      </CardContent>
+    </Card>
   );
 }

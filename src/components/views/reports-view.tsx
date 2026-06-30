@@ -182,7 +182,84 @@ export function ReportsView() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Stock Valuation by Warehouse */}
+      <WarehouseValuation />
     </div>
+  );
+}
+
+function WarehouseValuation() {
+  const { data, loading } = useFetch<{
+    warehouses: { id: number; name: string; type: string; bu: string; totalValue: number; totalUnits: number; items: { sku: string; name: string; qty: number; unit: string; unitCost: number; totalValue: number; bu: string }[] }[];
+    grandTotal: number;
+    warehouseCount: number;
+  }>("/api/reports/valuation");
+
+  if (loading) return <Card><CardContent className="py-8"><Skeleton className="h-40 w-full" /></CardContent></Card>;
+
+  const warehouses = data?.warehouses ?? [];
+  const grandTotal = data?.grandTotal ?? 0;
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0">
+        <div>
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <DollarSign className="h-4 w-4 text-emerald-500" /> Stock Valuation by Warehouse
+          </CardTitle>
+          <CardDescription className="text-xs">Current on-hand value across {data?.warehouseCount ?? 0} warehouses</CardDescription>
+        </div>
+        <div className="text-right">
+          <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 tnum">{formatMoney(grandTotal)}</div>
+          <div className="text-[10px] text-muted-foreground">Total inventory value</div>
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/40 hover:bg-muted/40">
+                <TableHead>Warehouse</TableHead>
+                <TableHead className="w-[80px]">BU</TableHead>
+                <TableHead className="w-[90px] text-right">Items</TableHead>
+                <TableHead className="w-[120px] text-right">Total Value</TableHead>
+                <TableHead className="w-[150px]">Share</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {warehouses.map((wh) => {
+                const share = grandTotal > 0 ? (wh.totalValue / grandTotal) * 100 : 0;
+                return (
+                  <TableRow key={wh.id}>
+                    <TableCell>
+                      <div className="font-medium">{wh.name}</div>
+                      <div className="text-[10px] text-muted-foreground">{wh.items.length} distinct SKUs</div>
+                    </TableCell>
+                    <TableCell>
+                      {wh.bu !== "—" && <span className={`rounded border px-1.5 py-0.5 text-[10px] font-bold ${wh.bu === "WP" ? "bg-teal-100 text-teal-800 border-teal-300 dark:bg-teal-950/40 dark:text-teal-300" : wh.bu === "CHEM" ? "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/40 dark:text-amber-300" : "bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950/40 dark:text-rose-300"}`}>{wh.bu}</span>}
+                    </TableCell>
+                    <TableCell className="text-right font-mono tnum">{formatNumber(wh.totalUnits + wh.items.reduce((s, i) => s + (i.qty > 1 ? i.qty - 1 : 0), 0))}</TableCell>
+                    <TableCell className="text-right font-mono font-semibold tnum">{formatMoney(wh.totalValue)}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Progress value={share} className="h-1.5" />
+                        <span className="text-[10px] tnum text-muted-foreground">{formatNumber(share, 0)}%</span>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+              {warehouses.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">No warehouse data available</TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
