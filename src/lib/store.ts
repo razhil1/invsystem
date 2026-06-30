@@ -9,7 +9,8 @@ export type ViewKey =
   | "projects"
   | "guides"
   | "reports"
-  | "scanner";
+  | "scanner"
+  | "audit";
 
 interface UserOption { id: string; fullName: string; role: string }
 

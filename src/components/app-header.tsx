@@ -28,6 +28,7 @@ const VIEW_TITLES: Record<ViewKey, { title: string; subtitle: string }> = {
   projects: { title: "Projects", subtitle: "Project site stock & progress" },
   guides: { title: "Service Guides", subtitle: "Static reference for service-to-item mapping" },
   reports: { title: "Reports & Analytics", subtitle: "Valuation, movement trends, project costing" },
+  audit: { title: "Audit Log", subtitle: "Who did what, when — full accountability trail" },
   scanner: { title: "QR Scanner", subtitle: "Verify physical items by scanning" },
 };
 
@@ -73,16 +74,16 @@ export function AppHeader() {
         <p className="hidden truncate text-xs text-muted-foreground sm:block">{meta.subtitle}</p>
       </div>
 
-      {/* Quick search */}
+      {/* Quick search — opens command palette */}
       <Button
         variant="outline"
         size="sm"
         className="hidden gap-2 text-muted-foreground md:inline-flex"
-        onClick={() => setView("transactions")}
+        onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}
       >
         <Search className="h-4 w-4" />
-        <span>Search ledger…</span>
-        <kbd className="ml-2 rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px]">/</kbd>
+        <span>Search…</span>
+        <kbd className="ml-2 rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px]">⌘K</kbd>
       </Button>
 
       {/* New transaction */}

@@ -6,6 +6,7 @@ import { useUI, type ViewKey } from "@/lib/store";
 import { AppSidebar } from "@/components/app-sidebar";
 import { AppHeader } from "@/components/app-header";
 import { QRScannerModal } from "@/components/qr-scanner-modal";
+import { CommandPalette } from "@/components/command-palette";
 import { useTheme } from "next-themes";
 import { Skeleton } from "@/components/ui/skeleton";
 // Lazy-load each view so Turbopack compiles them on-demand,
@@ -18,6 +19,7 @@ const LocationsView = dynamic(() => import("@/components/views/locations-view").
 const ProjectsView = dynamic(() => import("@/components/views/projects-view").then((m) => m.ProjectsView), { ssr: false, loading: () => <ViewSkeleton /> });
 const GuidesView = dynamic(() => import("@/components/views/guides-view").then((m) => m.GuidesView), { ssr: false, loading: () => <ViewSkeleton /> });
 const ReportsView = dynamic(() => import("@/components/views/reports-view").then((m) => m.ReportsView), { ssr: false, loading: () => <ViewSkeleton /> });
+const AuditLogView = dynamic(() => import("@/components/views/audit-log-view").then((m) => m.AuditLogView), { ssr: false, loading: () => <ViewSkeleton /> });
 
 function ViewSkeleton() {
   return (
@@ -66,7 +68,7 @@ export default function Page() {
       if (gPressed) {
         const map: Record<string, ViewKey> = {
           d: "dashboard", a: "approvals", t: "transactions", i: "items",
-          l: "locations", p: "projects", r: "reports", s: "scanner",
+          l: "locations", p: "projects", r: "reports", g: "guides", s: "scanner", u: "audit",
         };
         if (map[e.key]) {
           state.setView(map[e.key]);
@@ -87,7 +89,7 @@ export default function Page() {
         // Show shortcuts help via toast
         import("sonner").then(({ toast }) => {
           toast.info("Keyboard shortcuts", {
-            description: "g+d Dashboard · g+a Approvals · g+t Ledger · g+i Items · g+l Locations · g+p Projects · g+r Reports · s Scan · / Search",
+            description: "g+d Dashboard · g+a Approvals · g+t Ledger · g+i Items · g+l Locations · g+p Projects · g+r Reports · g+g Guides · g+u Audit · s Scan · / Search",
             duration: 6000,
           });
         });
@@ -135,6 +137,7 @@ export default function Page() {
           {view === "projects" && <ProjectsView />}
           {view === "guides" && <GuidesView />}
           {view === "reports" && <ReportsView />}
+          {view === "audit" && <AuditLogView />}
           {view === "scanner" && <ScannerRedirect onOpen={() => openScanner()} onDone={() => setView("dashboard")} />}
           </div>
         </main>
@@ -154,6 +157,7 @@ export default function Page() {
         </footer>
       </div>
       <QRScannerModal />
+      <CommandPalette />
     </div>
   );
 }

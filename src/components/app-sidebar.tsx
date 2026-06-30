@@ -16,6 +16,7 @@ import {
   Boxes,
   ChevronLeft,
   ShieldCheck,
+  Shield,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -37,6 +38,7 @@ const NAV: NavItem[] = [
   { key: "projects", label: "Projects", icon: FolderKanban, description: "Project site stock", group: "master" },
   { key: "guides", label: "Service Guides", icon: BookOpen, description: "Static reference", group: "master" },
   { key: "reports", label: "Reports", icon: BarChart3, description: "Analytics & valuation", group: "analytics" },
+  { key: "audit", label: "Audit Log", icon: Shield, description: "Who did what, when", group: "analytics" },
 ];
 
 const GROUP_LABELS: Record<NavItem["group"], string> = {
