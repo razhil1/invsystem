@@ -100,3 +100,55 @@ The system is now **fully stable** with zero console errors. The previous React 
 5. **Expiry tracking alerts** — Proactive alerts for batch items nearing expiry (chemicals especially)
 6. **Advanced search** — Global search across items, transactions, projects with a command palette (Cmd+K)
 7. **Export enhancements** — PDF reports, project cost breakdowns, stock valuation reports
+
+---
+
+## Cron Review #4 — Bug Fixes + New Features + GitHub Push
+
+### Issues Fixed
+1. **Keyboard shortcut `g+g` not working** — The `g: "guides"` mapping was missing from the shortcut map in `page.tsx` (previous fix was lost). Re-added it.
+2. **Missing files recovered** — The following files were created in previous sessions but never committed to git (lost on session reset):
+   - `src/components/command-palette.tsx` — Command Palette component
+   - `src/app/api/search/route.ts` — Global search API
+   - `src/app/api/dashboard/timeline/route.ts` — Activity timeline API
+   - `src/app/api/dashboard/expiry/route.ts` — Expiry tracker API
+   - All recreated and verified working.
+
+### New Features Added
+1. **Audit Log View** — A full accountability trail showing every CREATED, APPROVED, REJECTED, and SCANNED event with:
+   - Actor name and role
+   - Timestamp (relative + absolute)
+   - Item details with BU badge
+   - Movement path (from → to)
+   - Transaction type and ID
+   - Stats cards (counts per action)
+   - Filterable by action type
+   - Pagination
+
+2. **Audit Log API** (`GET /api/audit-log`) — Derives audit entries from transaction timestamps (createdAt, approvedAt, qrScannedAt) with full user/item/location context.
+
+3. **Audit Log Navigation** — Added to sidebar under "Insights" group, keyboard shortcut `g+u`, command palette entry, and header view title.
+
+### GitHub Push
+- Repository: https://github.com/razhil1/invsystem.git
+- All code pushed to `main` branch
+- Commit: `ff6b084 feat: add Audit Log, Command Palette, fix keyboard shortcuts`
+- Added README.md with full documentation
+- Updated .gitignore to exclude db/, screenshots, uploads
+
+### Verification (agent-browser)
+- ✅ All 11 API endpoints return 200 (including new audit-log, search, timeline, expiry)
+- ✅ Dashboard renders "Operations Dashboard"
+- ✅ `g+g` → Service Guides ✓ (fixed)
+- ✅ `g+u` → Audit Log ✓ (new)
+- ✅ Cmd+K → Command Palette opens ✓
+- ✅ Audit Log shows real entries (Approved, Scanned, Created)
+- ✅ Zero console errors
+- ✅ Lint passes clean
+
+### API Endpoints (now 16 route groups)
+All previous endpoints +:
+- `GET /api/audit-log` — audit trail with action filter
+- `GET /api/search?q=query` — global search
+- `GET /api/dashboard/timeline?days=N` — daily movement counts
+- `GET /api/dashboard/expiry` — batches nearing expiry
